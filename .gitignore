@@ -6,7 +6,6 @@ package-lock.json
 .env
 .env.local
 .env.production
-.env.*.local
 
 # Database files
 databases/*.json
@@ -20,11 +19,6 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
-desktop.ini
 
 # Railway
 .railway/
-*.railway
-
-# Discord bot token
-*.token
