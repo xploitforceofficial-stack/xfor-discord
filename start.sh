@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Create databases directory if it doesn't exist
 mkdir -p databases
@@ -27,7 +27,7 @@ if [ ! -f databases/bot_stats.json ]; then
         "totalServerSearches": 0,
         "totalScriptReleases": 0,
         "userActivity": {},
-        "startTime": '$(date +%s)'000,
+        "startTime": '"$(date +%s)"'000,
         "premiumSubscriptions": 0,
         "premiumRevenue": 0
     }' > databases/bot_stats.json
