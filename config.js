@@ -1,4 +1,4 @@
-// config.js - Updated to use environment variables
+// config.js
 require('dotenv').config();
 
 module.exports = {
@@ -13,7 +13,10 @@ module.exports = {
     TARGET_CHANNELS: process.env.TARGET_CHANNELS ? process.env.TARGET_CHANNELS.split(',') : [],
     
     // Banned Words
-    BAD_WORDS: process.env.BAD_WORDS ? process.env.BAD_WORDS.split(',') : [],
+    BAD_WORDS: process.env.BAD_WORDS ? process.env.BAD_WORDS.split(',') : [
+        "PORN", "XXX", "BOKEP", "MMK", "KNTL", "PELER", "MEMEK", 
+        "KONTOL", "NGENTOT", "JEMBUT", "VCS", "SANGE", "SEX"
+    ],
     
     // Thumbnail URLs
     THUMBNAILS: {
