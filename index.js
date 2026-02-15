@@ -902,7 +902,8 @@ async function sendServerListEmbed(channel, servers, query) {
 
 // ========== DISCORD BOT EVENTS ==========
 
-client.once('ready', () => {
+// Di bagian client.once('ready', ...) - ganti dengan:
+client.once('clientReady', () => {  // Ganti dari 'ready' ke 'clientReady'
     console.log('='.repeat(60));
     console.log('🍷 XFOR DISCORD BOT');
     console.log('🎮 ROBLOX SCRIPT & SERVER FINDER');
