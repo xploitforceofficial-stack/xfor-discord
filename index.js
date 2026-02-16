@@ -40,6 +40,7 @@ client.premiumCooldowns = new Collection();
 client.gameSearchCache = new Collection();
 client.activeCooldownEdit = new Set();
 client.scriptCache = new Collection(); // Cache untuk menyimpan script sementara
+client.userDailyCopies = new Collection(); // Tracking daily copies
 
 // Create databases directory if it doesn't exist
 if (!fs.existsSync('./databases')) {
@@ -91,7 +92,7 @@ function loadStats() {
             totalObfuscates: 0,
             totalServerSearches: 0,
             totalScriptReleases: 0,
-            totalCopies: 0, // Tambahkan statistik copy
+            totalCopies: 0,
             userActivity: {},
             startTime: Date.now(),
             premiumSubscriptions: 0,
@@ -107,7 +108,7 @@ function loadStats() {
             totalObfuscates: stats.totalObfuscates || 0,
             totalServerSearches: stats.totalServerSearches || 0,
             totalScriptReleases: stats.totalScriptReleases || 0,
-            totalCopies: stats.totalCopies || 0, // Tambahkan statistik copy
+            totalCopies: stats.totalCopies || 0,
             userActivity: stats.userActivity || {},
             startTime: stats.startTime || Date.now(),
             premiumSubscriptions: stats.premiumSubscriptions || 0,
@@ -300,23 +301,12 @@ function createScriptButtons(scriptIndex, scriptId, isPremium = false) {
             .setEmoji('📄')
     );
     
-    // Untuk free user, tampilkan tombol premium
-    if (!isPremium) {
-        row.addComponents(
-            new ButtonBuilder()
-                .setCustomId('get_premium')
-                .setLabel('💎 Premium')
-                .setStyle(ButtonStyle.Success)
-                .setEmoji('💎')
-        );
-    }
-    
     // Tombol Save ke Vault (untuk semua user)
     row.addComponents(
         new ButtonBuilder()
             .setCustomId(`save_vault_${scriptId}`)
-            .setLabel('💾 Save')
-            .setStyle(ButtonStyle.Secondary)
+            .setLabel('💾 Save to Vault')
+            .setStyle(ButtonStyle.Success)
             .setEmoji('💾')
     );
     
@@ -325,6 +315,29 @@ function createScriptButtons(scriptIndex, scriptId, isPremium = false) {
 
 function generateScriptId() {
     return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+}
+
+function checkDailyCopyLimit(userId) {
+    const today = new Date().toDateString();
+    const key = `${userId}_${today}`;
+    const count = client.userDailyCopies.get(key) || 0;
+    return {
+        count,
+        remaining: Math.max(0, 5 - count),
+        canCopy: count < 5
+    };
+}
+
+function incrementDailyCopyCount(userId) {
+    const today = new Date().toDateString();
+    const key = `${userId}_${today}`;
+    const count = client.userDailyCopies.get(key) || 0;
+    client.userDailyCopies.set(key, count + 1);
+    
+    // Auto cleanup setiap hari
+    setTimeout(() => {
+        client.userDailyCopies.delete(key);
+    }, 24 * 60 * 60 * 1000);
 }
 
 // ========== ROBLOX API FUNCTIONS ==========
@@ -985,6 +998,15 @@ client.once('ready', () => {
         }
     }, 3600000);
     
+    // Reset daily copy limits at midnight
+    setInterval(() => {
+        const now = new Date();
+        if (now.getHours() === 0 && now.getMinutes() === 0) {
+            client.userDailyCopies.clear();
+            console.log('🔄 Daily copy limits reset');
+        }
+    }, 60000);
+    
     // Start auto-release interval
     setInterval(async () => {
         try {
@@ -1103,7 +1125,7 @@ client.on('messageCreate', async (message) => {
                     '┗ `.getid` - Extract loadstring (reply)\n\n' +
                     '**📋 COPY FEATURES**\n' +
                     '┣ Click buttons below scripts to copy\n' +
-                    '┣ Premium users get unlimited copies\n' +
+                    '┣ Premium users: Unlimited copies\n' +
                     '┗ Free users: 5 copies/day\n\n' +
                     '**🔐 OBFUSCATOR**\n' +
                     '┣ `.obfuscate <level>` - Obfuscate script\n' +
@@ -1532,50 +1554,7 @@ client.on('interactionCreate', async (interaction) => {
         return;
     }
     
-    // Handle get premium button
-    if (customId === 'get_premium') {
-        const embed = new EmbedBuilder()
-            .setColor(0xFFD700)
-            .setTitle('💰 UPGRADE TO PREMIUM')
-            .setDescription(
-                `**Price:** Rp ${config.PREMIUM_PRICE.toLocaleString()} / month\n\n` +
-                `**✨ Premium Benefits:**\n` +
-                `• ⚡ No cooldown\n` +
-                `• 🔍 15+ search results\n` +
-                `• 📋 Unlimited script copies\n` +
-                `• 🌐 3 API sources\n` +
-                `• 💾 Unlimited vault\n\n` +
-                `Click the payment buttons below to upgrade!`
-            );
-        
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('pay_dana')
-                    .setLabel('DANA')
-                    .setStyle(ButtonStyle.Primary)
-                    .setEmoji('💳'),
-                new ButtonBuilder()
-                    .setCustomId('pay_gopay')
-                    .setLabel('GOPAY')
-                    .setStyle(ButtonStyle.Success)
-                    .setEmoji('📱'),
-                new ButtonBuilder()
-                    .setCustomId('pay_qris')
-                    .setLabel('QRIS')
-                    .setStyle(ButtonStyle.Secondary)
-                    .setEmoji('📷')
-            );
-        
-        await interaction.reply({ 
-            embeds: [embed], 
-            components: [row],
-            ephemeral: true 
-        });
-        return;
-    }
-    
-    // Handle copy script button
+    // Handle copy script button - TAMPIL DI CHANNEL, BUKAN DM
     if (customId.startsWith('copy_script_')) {
         const scriptId = customId.replace('copy_script_', '');
         const cachedScript = client.scriptCache.get(scriptId);
@@ -1589,37 +1568,35 @@ client.on('interactionCreate', async (interaction) => {
         
         // Cek limit untuk free user
         if (!isPremium) {
-            const userCopyKey = `copy_${userId}_${new Date().toDateString()}`;
-            const userCopies = client.scriptCache.get(userCopyKey) || 0;
-            
-            if (userCopies >= 5) {
+            const limit = checkDailyCopyLimit(userId);
+            if (!limit.canCopy) {
                 return interaction.reply({ 
-                    content: '❌ You have reached your daily copy limit (5 scripts). Upgrade to premium for unlimited copies!', 
+                    content: `❌ Daily copy limit reached! You have used 5/5 copies today. Upgrade to premium for unlimited copies!`, 
                     ephemeral: true 
                 });
             }
-            
-            client.scriptCache.set(userCopyKey, userCopies + 1);
+        }
+        
+        // Increment copy count untuk free user
+        if (!isPremium) {
+            incrementDailyCopyCount(userId);
         }
         
         // Update stats
         botStats.totalCopies++;
         saveStats(botStats);
         
-        // Kirim script via DM
-        try {
-            await interaction.user.send({
-                content: `**📋 Script: ${cachedScript.title}**\n\n\`\`\`lua\n${cachedScript.script}\n\`\`\``
-            });
-            
-            await interaction.reply({ 
-                content: '✅ Script has been sent to your DM! Check your direct messages.', 
-                ephemeral: true 
-            });
-        } catch (dmError) {
-            // Jika DM terkunci, kirim di channel
-            await interaction.reply({ 
-                content: `**📋 Script: ${cachedScript.title}**\n\n\`\`\`lua\n${cachedScript.script}\n\`\`\``,
+        // Tampilkan script di channel (bukan DM)
+        await interaction.reply({ 
+            content: `**📋 Script: ${cachedScript.title}**\n\n\`\`\`lua\n${cachedScript.script}\n\`\`\``,
+            ephemeral: false // Tampil di channel
+        });
+        
+        // Kirim pesan sisa limit untuk free user
+        if (!isPremium) {
+            const remaining = 5 - (client.userDailyCopies.get(`${userId}_${new Date().toDateString()}`) || 0);
+            await interaction.followUp({ 
+                content: `📊 Daily copies remaining: ${remaining}/5`,
                 ephemeral: true 
             });
         }
@@ -1644,7 +1621,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.reply({ 
             content: `**📄 Raw Script: ${cachedScript.title}**`,
             files: [attachment],
-            ephemeral: true 
+            ephemeral: false // Tampil di channel
         });
     }
     
