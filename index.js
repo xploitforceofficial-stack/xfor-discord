@@ -39,6 +39,7 @@ client.cooldowns = new Collection();
 client.premiumCooldowns = new Collection();
 client.gameSearchCache = new Collection();
 client.activeCooldownEdit = new Set();
+client.scriptCache = new Collection(); // Cache untuk menyimpan script sementara
 
 // Create databases directory if it doesn't exist
 if (!fs.existsSync('./databases')) {
@@ -90,6 +91,7 @@ function loadStats() {
             totalObfuscates: 0,
             totalServerSearches: 0,
             totalScriptReleases: 0,
+            totalCopies: 0, // Tambahkan statistik copy
             userActivity: {},
             startTime: Date.now(),
             premiumSubscriptions: 0,
@@ -105,6 +107,7 @@ function loadStats() {
             totalObfuscates: stats.totalObfuscates || 0,
             totalServerSearches: stats.totalServerSearches || 0,
             totalScriptReleases: stats.totalScriptReleases || 0,
+            totalCopies: stats.totalCopies || 0, // Tambahkan statistik copy
             userActivity: stats.userActivity || {},
             startTime: stats.startTime || Date.now(),
             premiumSubscriptions: stats.premiumSubscriptions || 0,
@@ -118,6 +121,7 @@ function loadStats() {
             totalObfuscates: 0,
             totalServerSearches: 0,
             totalScriptReleases: 0,
+            totalCopies: 0,
             userActivity: {},
             startTime: Date.now(),
             premiumSubscriptions: 0,
@@ -222,6 +226,8 @@ function updateStats(command, userId) {
         botStats.totalServerSearches++;
     } else if (command === 'premium') {
         botStats.premiumSubscriptions++;
+    } else if (command === 'copy') {
+        botStats.totalCopies++;
     }
     
     if (!botStats.userActivity[userId]) {
@@ -269,6 +275,56 @@ function checkCooldown(userId, isPremium = false) {
     userCooldown.count++;
     cooldownMap.set(userId, userCooldown);
     return { hasCooldown: false, timeLeft: 0 };
+}
+
+// ========== FUNGSI COPY SCRIPT ==========
+
+function createScriptButtons(scriptIndex, scriptId, isPremium = false) {
+    const row = new ActionRowBuilder();
+    
+    // Tombol Copy Script
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`copy_script_${scriptId}`)
+            .setLabel('📋 Copy Script')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('📋')
+    );
+    
+    // Tombol Show Raw
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`raw_script_${scriptId}`)
+            .setLabel('📄 Show Raw')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('📄')
+    );
+    
+    // Untuk free user, tampilkan tombol premium
+    if (!isPremium) {
+        row.addComponents(
+            new ButtonBuilder()
+                .setCustomId('get_premium')
+                .setLabel('💎 Premium')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('💎')
+        );
+    }
+    
+    // Tombol Save ke Vault (untuk semua user)
+    row.addComponents(
+        new ButtonBuilder()
+            .setCustomId(`save_vault_${scriptId}`)
+            .setLabel('💾 Save')
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji('💾')
+    );
+    
+    return row;
+}
+
+function generateScriptId() {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
 
 // ========== ROBLOX API FUNCTIONS ==========
@@ -902,8 +958,7 @@ async function sendServerListEmbed(channel, servers, query) {
 
 // ========== DISCORD BOT EVENTS ==========
 
-// Di bagian client.once('ready', ...) - ganti dengan:
-client.once('clientReady', () => {  // Ganti dari 'ready' ke 'clientReady'
+client.once('ready', () => {
     console.log('='.repeat(60));
     console.log('🍷 XFOR DISCORD BOT');
     console.log('🎮 ROBLOX SCRIPT & SERVER FINDER');
@@ -919,6 +974,16 @@ client.once('clientReady', () => {  // Ganti dari 'ready' ke 'clientReady'
         activities: [{ name: '.help | XFOR BOT', type: 3 }],
         status: 'online'
     });
+    
+    // Clean script cache every hour
+    setInterval(() => {
+        const now = Date.now();
+        for (const [key, value] of client.scriptCache) {
+            if (now - value.timestamp > 3600000) { // 1 hour
+                client.scriptCache.delete(key);
+            }
+        }
+    }, 3600000);
     
     // Start auto-release interval
     setInterval(async () => {
@@ -943,6 +1008,13 @@ client.once('clientReady', () => {  // Ganti dari 'ready' ke 'clientReady'
                 await channel.send({ embeds: [embed] });
                 
                 for (let i = 0; i < scripts.length; i++) {
+                    const scriptId = generateScriptId();
+                    client.scriptCache.set(scriptId, {
+                        script: scripts[i].script,
+                        title: scripts[i].title,
+                        timestamp: Date.now()
+                    });
+                    
                     const scriptEmbed = new EmbedBuilder()
                         .setColor(0x00FF00)
                         .setTitle(`📜 SCRIPT ${i + 1}/${scripts.length}: ${scripts[i].title}`)
@@ -953,13 +1025,18 @@ client.once('clientReady', () => {  // Ganti dari 'ready' ke 'clientReady'
                             `👁️ **Views:** ${scripts[i].views.toLocaleString()}\n` +
                             `👍 **Likes:** ${scripts[i].likes} | 👎 **Dislikes:** ${scripts[i].dislikes}\n` +
                             `🛡️ **Verified:** ${scripts[i].verified ? '✅ YES' : '❌ NO'}\n` +
-                            `👤 **Creator:** ${scripts[i].creator}\n\n` +
-                            `💻 **Loadstring:**\n\`${scripts[i].script}\``
+                            `👤 **Creator:** ${scripts[i].creator}`
                         )
                         .setThumbnail(scripts[i].image || config.THUMBNAILS.HELP)
                         .setFooter({ text: `XFOR Discord Bot • Updated: ${new Date(scripts[i].lastUpdated).toLocaleDateString()}` });
                     
-                    await channel.send({ embeds: [scriptEmbed] });
+                    const isPremium = false; // Default untuk auto-release
+                    const buttons = createScriptButtons(i, scriptId, isPremium);
+                    
+                    await channel.send({ 
+                        embeds: [scriptEmbed], 
+                        components: [buttons] 
+                    });
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
             }
@@ -1024,6 +1101,10 @@ client.on('messageCreate', async (message) => {
                     '┣ `.vsearch <query>` - Verified only\n' +
                     '┣ `.stats` - Trending scripts\n' +
                     '┗ `.getid` - Extract loadstring (reply)\n\n' +
+                    '**📋 COPY FEATURES**\n' +
+                    '┣ Click buttons below scripts to copy\n' +
+                    '┣ Premium users get unlimited copies\n' +
+                    '┗ Free users: 5 copies/day\n\n' +
                     '**🔐 OBFUSCATOR**\n' +
                     '┣ `.obfuscate <level>` - Obfuscate script\n' +
                     '┣ `.obflong <level>` - For large scripts\n' +
@@ -1039,6 +1120,7 @@ client.on('messageCreate', async (message) => {
                         '**💎 PREMIUM FEATURES**\n' +
                         '┣ ⚡ No cooldown\n' +
                         '┣ 🔍 15+ results\n' +
+                        '┣ 📋 Unlimited copies\n' +
                         '┣ 💾 Unlimited vault\n' +
                         '┗ 🚨 Priority support\n\n' : 
                         '**💰 UPGRADE**\n' +
@@ -1143,6 +1225,16 @@ client.on('messageCreate', async (message) => {
                 
                 for (let i = 0; i < resultCount; i++) {
                     const script = results[i];
+                    const scriptId = generateScriptId();
+                    
+                    // Simpan script ke cache
+                    client.scriptCache.set(scriptId, {
+                        script: script.script,
+                        title: script.title,
+                        userId: userId,
+                        timestamp: Date.now()
+                    });
+                    
                     const embed = new EmbedBuilder()
                         .setColor(script.verified ? 0x00FF00 : 0xFFA500)
                         .setTitle(`${i + 1}. ${script.title}`)
@@ -1152,13 +1244,18 @@ client.on('messageCreate', async (message) => {
                             `📱 **Mobile Ready:** ${script.mobileReady ? '✅ YES' : '❌ NO'}\n` +
                             `👁️ **Views:** ${script.views.toLocaleString()}\n` +
                             `🛡️ **Verified:** ${script.verified ? '✅ YES' : '❌ NO'}\n` +
-                            `👤 **Creator:** ${script.creator}\n\n` +
-                            `💻 **Loadstring:**\n\`${script.script}\``
+                            `👤 **Creator:** ${script.creator}\n` +
+                            `📋 **Click buttons below to copy!**`
                         )
                         .setThumbnail(script.image)
-                        .setFooter({ text: `Source: ${script.source}` });
+                        .setFooter({ text: `Source: ${script.source} • ID: ${scriptId.substring(0, 8)}` });
                     
-                    await message.channel.send({ embeds: [embed] });
+                    const buttons = createScriptButtons(i, scriptId, isPremium);
+                    
+                    await message.channel.send({ 
+                        embeds: [embed], 
+                        components: [buttons] 
+                    });
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 }
                 
@@ -1181,6 +1278,7 @@ client.on('messageCreate', async (message) => {
                         `**✨ Premium Benefits:**\n` +
                         `• ⚡ No cooldown\n` +
                         `• 🔍 15+ search results\n` +
+                        `• 📋 Unlimited script copies\n` +
                         `• 💾 Unlimited vault storage\n` +
                         `• 🚨 Priority support`
                     )
@@ -1197,6 +1295,7 @@ client.on('messageCreate', async (message) => {
                         `**✨ Premium Benefits:**\n` +
                         `• ⚡ No cooldown\n` +
                         `• 🔍 15+ search results (vs 6 free)\n` +
+                        `• 📋 Unlimited script copies\n` +
                         `• 🌐 3 API sources\n` +
                         `• 💬 Private chat access\n` +
                         `• 💾 Unlimited vault (vs 5 free)\n` +
@@ -1300,6 +1399,7 @@ client.on('messageCreate', async (message) => {
                     `┣ Vault Saves: ${botStats.totalVaultSaves}\n` +
                     `┣ Obfuscations: ${botStats.totalObfuscates}\n` +
                     `┣ Script Releases: ${botStats.totalScriptReleases}\n` +
+                    `┣ Script Copies: ${botStats.totalCopies}\n` +
                     `┣ Premium Subs: ${botStats.premiumSubscriptions}\n` +
                     `┣ Premium Revenue: Rp ${(botStats.premiumRevenue || 0).toLocaleString()}\n` +
                     `┣ Active Users: ${totalActiveUsers}\n` +
@@ -1370,60 +1470,225 @@ client.on('interactionCreate', async (interaction) => {
     if (!interaction.isButton()) return;
     
     const userId = interaction.user.id;
+    const isPremium = isPremiumUser(userId);
+    const customId = interaction.customId;
     
-    switch (interaction.customId) {
-        case 'pay_dana':
-            await interaction.reply({
-                content: 
-                    `**💳 PAYMENT VIA DANA**\n\n` +
-                    `📱 **Number:** ${config.PAYMENT_METHODS.DANA.number}\n` +
-                    `👤 **Name:** ${config.PAYMENT_METHODS.DANA.name}\n\n` +
-                    `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                    `📅 **Duration:** 30 days\n\n` +
-                    `📞 **After Payment:**\n` +
-                    `1. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                    `2. Send proof to <@${config.OWNER_IDS[0]}>\n` +
-                    `3. Premium will be activated within 15 minutes!`,
-                ephemeral: true
+    // Handle payment buttons
+    if (customId.startsWith('pay_')) {
+        switch (customId) {
+            case 'pay_dana':
+                await interaction.reply({
+                    content: 
+                        `**💳 PAYMENT VIA DANA**\n\n` +
+                        `📱 **Number:** ${config.PAYMENT_METHODS.DANA.number}\n` +
+                        `👤 **Name:** ${config.PAYMENT_METHODS.DANA.name}\n\n` +
+                        `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                        `📅 **Duration:** 30 days\n\n` +
+                        `📞 **After Payment:**\n` +
+                        `1. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                        `2. Send proof to <@${config.OWNER_IDS[0]}>\n` +
+                        `3. Premium will be activated within 15 minutes!`,
+                    ephemeral: true
+                });
+                break;
+                
+            case 'pay_gopay':
+                await interaction.reply({
+                    content:
+                        `**📱 PAYMENT VIA GOPAY**\n\n` +
+                        `📱 **Number:** ${config.PAYMENT_METHODS.GOPAY.number}\n` +
+                        `👤 **Name:** ${config.PAYMENT_METHODS.GOPAY.name}\n\n` +
+                        `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                        `📅 **Duration:** 30 days\n\n` +
+                        `📞 **After Payment:**\n` +
+                        `1. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                        `2. Send proof to <@${config.OWNER_IDS[0]}>\n` +
+                        `3. Premium will be activated within 15 minutes!`,
+                    ephemeral: true
+                });
+                break;
+                
+            case 'pay_qris':
+                await interaction.reply({
+                    embeds: [
+                        new EmbedBuilder()
+                            .setColor(0x00FF00)
+                            .setTitle('📷 QRIS PAYMENT')
+                            .setDescription(
+                                `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                                `📅 **Duration:** 30 days\n\n` +
+                                `📞 **After Payment:**\n` +
+                                `1. Scan QR code\n` +
+                                `2. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
+                                `3. Send proof to <@${config.OWNER_IDS[0]}>\n` +
+                                `4. Premium will be activated within 15 minutes!`
+                            )
+                            .setImage(config.PAYMENT_METHODS.QRIS.url)
+                    ],
+                    ephemeral: true
+                });
+                break;
+        }
+        return;
+    }
+    
+    // Handle get premium button
+    if (customId === 'get_premium') {
+        const embed = new EmbedBuilder()
+            .setColor(0xFFD700)
+            .setTitle('💰 UPGRADE TO PREMIUM')
+            .setDescription(
+                `**Price:** Rp ${config.PREMIUM_PRICE.toLocaleString()} / month\n\n` +
+                `**✨ Premium Benefits:**\n` +
+                `• ⚡ No cooldown\n` +
+                `• 🔍 15+ search results\n` +
+                `• 📋 Unlimited script copies\n` +
+                `• 🌐 3 API sources\n` +
+                `• 💾 Unlimited vault\n\n` +
+                `Click the payment buttons below to upgrade!`
+            );
+        
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('pay_dana')
+                    .setLabel('DANA')
+                    .setStyle(ButtonStyle.Primary)
+                    .setEmoji('💳'),
+                new ButtonBuilder()
+                    .setCustomId('pay_gopay')
+                    .setLabel('GOPAY')
+                    .setStyle(ButtonStyle.Success)
+                    .setEmoji('📱'),
+                new ButtonBuilder()
+                    .setCustomId('pay_qris')
+                    .setLabel('QRIS')
+                    .setStyle(ButtonStyle.Secondary)
+                    .setEmoji('📷')
+            );
+        
+        await interaction.reply({ 
+            embeds: [embed], 
+            components: [row],
+            ephemeral: true 
+        });
+        return;
+    }
+    
+    // Handle copy script button
+    if (customId.startsWith('copy_script_')) {
+        const scriptId = customId.replace('copy_script_', '');
+        const cachedScript = client.scriptCache.get(scriptId);
+        
+        if (!cachedScript) {
+            return interaction.reply({ 
+                content: '❌ Script expired or not found! Please search again.', 
+                ephemeral: true 
             });
-            break;
+        }
+        
+        // Cek limit untuk free user
+        if (!isPremium) {
+            const userCopyKey = `copy_${userId}_${new Date().toDateString()}`;
+            const userCopies = client.scriptCache.get(userCopyKey) || 0;
             
-        case 'pay_gopay':
-            await interaction.reply({
-                content:
-                    `**📱 PAYMENT VIA GOPAY**\n\n` +
-                    `📱 **Number:** ${config.PAYMENT_METHODS.GOPAY.number}\n` +
-                    `👤 **Name:** ${config.PAYMENT_METHODS.GOPAY.name}\n\n` +
-                    `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                    `📅 **Duration:** 30 days\n\n` +
-                    `📞 **After Payment:**\n` +
-                    `1. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                    `2. Send proof to <@${config.OWNER_IDS[0]}>\n` +
-                    `3. Premium will be activated within 15 minutes!`,
-                ephemeral: true
-            });
-            break;
+            if (userCopies >= 5) {
+                return interaction.reply({ 
+                    content: '❌ You have reached your daily copy limit (5 scripts). Upgrade to premium for unlimited copies!', 
+                    ephemeral: true 
+                });
+            }
             
-        case 'pay_qris':
-            await interaction.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setColor(0x00FF00)
-                        .setTitle('📷 QRIS PAYMENT')
-                        .setDescription(
-                            `💰 **Amount:** Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                            `📅 **Duration:** 30 days\n\n` +
-                            `📞 **After Payment:**\n` +
-                            `1. Scan QR code\n` +
-                            `2. Transfer Rp ${config.PREMIUM_PRICE.toLocaleString()}\n` +
-                            `3. Send proof to <@${config.OWNER_IDS[0]}>\n` +
-                            `4. Premium will be activated within 15 minutes!`
-                        )
-                        .setImage(config.PAYMENT_METHODS.QRIS.url)
-                ],
-                ephemeral: true
+            client.scriptCache.set(userCopyKey, userCopies + 1);
+        }
+        
+        // Update stats
+        botStats.totalCopies++;
+        saveStats(botStats);
+        
+        // Kirim script via DM
+        try {
+            await interaction.user.send({
+                content: `**📋 Script: ${cachedScript.title}**\n\n\`\`\`lua\n${cachedScript.script}\n\`\`\``
             });
-            break;
+            
+            await interaction.reply({ 
+                content: '✅ Script has been sent to your DM! Check your direct messages.', 
+                ephemeral: true 
+            });
+        } catch (dmError) {
+            // Jika DM terkunci, kirim di channel
+            await interaction.reply({ 
+                content: `**📋 Script: ${cachedScript.title}**\n\n\`\`\`lua\n${cachedScript.script}\n\`\`\``,
+                ephemeral: true 
+            });
+        }
+    }
+    
+    // Handle raw script button
+    if (customId.startsWith('raw_script_')) {
+        const scriptId = customId.replace('raw_script_', '');
+        const cachedScript = client.scriptCache.get(scriptId);
+        
+        if (!cachedScript) {
+            return interaction.reply({ 
+                content: '❌ Script expired or not found! Please search again.', 
+                ephemeral: true 
+            });
+        }
+        
+        // Buat file attachment
+        const buffer = Buffer.from(cachedScript.script, 'utf-8');
+        const attachment = new AttachmentBuilder(buffer, { name: `script_${scriptId}.lua` });
+        
+        await interaction.reply({ 
+            content: `**📄 Raw Script: ${cachedScript.title}**`,
+            files: [attachment],
+            ephemeral: true 
+        });
+    }
+    
+    // Handle save to vault button
+    if (customId.startsWith('save_vault_')) {
+        const scriptId = customId.replace('save_vault_', '');
+        const cachedScript = client.scriptCache.get(scriptId);
+        
+        if (!cachedScript) {
+            return interaction.reply({ 
+                content: '❌ Script expired or not found! Please search again.', 
+                ephemeral: true 
+            });
+        }
+        
+        const userVault = vault[userId] || [];
+        
+        // Cek limit vault untuk free user
+        if (!isPremium && userVault.length >= 5) {
+            return interaction.reply({ 
+                content: '❌ Vault limit reached (5 scripts). Upgrade to premium for unlimited vault!', 
+                ephemeral: true 
+            });
+        }
+        
+        // Simpan ke vault
+        const vaultEntry = {
+            id: Date.now(),
+            title: cachedScript.title,
+            script: cachedScript.script,
+            savedAt: new Date().toISOString()
+        };
+        
+        userVault.push(vaultEntry);
+        vault[userId] = userVault;
+        saveVault(vault);
+        
+        botStats.totalVaultSaves++;
+        saveStats(botStats);
+        
+        await interaction.reply({ 
+            content: `✅ Script "${cachedScript.title}" saved to your vault!`, 
+            ephemeral: true 
+        });
     }
 });
 
